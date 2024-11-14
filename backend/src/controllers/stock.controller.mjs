@@ -3,19 +3,21 @@ import { Stock } from "../models/stocks.model.mjs";
 import ApiError from "../utils/ApiError.mjs";
 import ApiResponse from "../utils/ApiResponse.mjs";
 import asyncHandler from "../utils/asyncHandler.mjs";
+import { v4 as uuid } from "uuid";
 
 const addStock = asyncHandler(async (req, res) => {
-	const { name, price, initialStock, minimumRequiredStock } = req.body;
-	if (!(name && price && initialStock && minimumRequiredStock)) {
+	const { name, price, initialStock, minimumRequiredStock, id } = req.body;
+	if (!(id && name && price && initialStock && minimumRequiredStock)) {
 		throw new ApiError(404, "Missing information");
 	}
 
-	const stockExist = await Stock.findOne({ name });
+	const stockExist = await Stock.findOne({ id });
 	if (stockExist) {
-		throw new ApiError(401, "Stock with the given name already exist");
+		throw new ApiError(401, "Stock with the given ID already exist");
 	}
 
 	const newStock = await Stock.create({
+		id: id,
 		name: name,
 		price: price,
 		quantity: initialStock,
@@ -38,20 +40,26 @@ const addStock = asyncHandler(async (req, res) => {
 });
 
 const updateStock = asyncHandler(async (req, res) => {
+	const { id } = req.params;
 	const { price, name } = req.body;
-	if (!name) {
+	if (!id) {
 		throw new ApiError(404, "Please provide the name of the stock");
 	}
 	if (!price) {
 		throw new ApiError(404, "Price not found");
 	}
-	const stock = await Stock.findOne({ name });
+	const stock = await Stock.findOne({ id });
 
 	if (!stock) {
 		throw new ApiError(404, "Stock with the given name is not found");
 	}
 
 	stock.price = price;
+
+	if (name) {
+		stock.name = name;
+	}
+
 	await stock.save({ validateBeforeSave: false });
 
 	return res
@@ -62,20 +70,24 @@ const updateStock = asyncHandler(async (req, res) => {
 });
 
 const increaseStockLevel = asyncHandler(async (req, res) => {
-	const { quantity, name } = req.body;
+	const { id } = req.params;
+	const { quantity } = req.body;
 	if (!quantity) {
 		throw new ApiError(404, "increment not found");
 	}
-	if (!name) {
-		throw new ApiError(404, "Stock name not found");
+	if (!id) {
+		throw new ApiError(404, "Stock ID not found");
 	}
-	const stock = await Stock.findOne({ name });
+	const stock = await Stock.findOne({ id });
 	if (!stock) {
 		throw new ApiError(404, "Stock with the given name not found");
 	}
 	const prevQ = stock.quantity;
 	stock.quantity = stock.quantity + quantity;
+	const logId = uuid();
 	const log = await Log.create({
+		id: logId,
+		stockId: stock.id,
 		stockName: stock.name,
 		operation: "Restock",
 		preQauntity: prevQ,
@@ -95,14 +107,15 @@ const increaseStockLevel = asyncHandler(async (req, res) => {
 });
 
 const sellStock = asyncHandler(async (req, res) => {
-	const { quantity, name } = req.body;
+	const { id } = req.params;
+	const { quantity } = req.body;
 	if (!quantity) {
 		throw new ApiError(404, "increment not found");
 	}
-	if (!name) {
+	if (!id) {
 		throw new ApiError(404, "Stock name not found");
 	}
-	const stock = await Stock.findOne({ name });
+	const stock = await Stock.findOne({ id });
 	if (!stock) {
 		throw new ApiError(404, "Stock with the given name not found");
 	}
@@ -112,7 +125,11 @@ const sellStock = asyncHandler(async (req, res) => {
 		throw new ApiError(403, "Can't sell! not enough stock are available");
 	}
 
+	const logId = uuid();
+
 	const log = await Log.create({
+		id: logId,
+		stockId: stock.id,
 		stockName: stock.name,
 		operation: "Sell",
 		preQauntity: prevQ,
@@ -132,14 +149,14 @@ const sellStock = asyncHandler(async (req, res) => {
 });
 
 const getLogHistory = asyncHandler(async (req, res) => {
-	const { name } = req.body;
-	if (!name) {
-		throw new ApiError(404, "Stock name not found");
+	const { id } = req.params;
+	if (!id) {
+		throw new ApiError(404, "Stock ID not found");
 	}
 
-	const logs = await Log.find({ stockName: name });
+	const logs = await Log.find({ stockId: id });
 	if (!logs || logs.length === 0) {
-		throw new ApiError(404, "logs with given stock name not found");
+		throw new ApiError(404, "logs with given stock id not found");
 	}
 
 	return res
@@ -151,7 +168,7 @@ const getLogHistory = asyncHandler(async (req, res) => {
 
 const stocksBelowMinimumReqLevel = asyncHandler(async (req, res) => {
 	const stocks = await Stock.find({
-		quantity: { $lt: stocksBelowMinimumReqLevel },
+		$expr: { $lt: ["$quantity", "$minimumRequiredStock"] },
 	});
 
 	if (!stocks || stocks.length === 0) {

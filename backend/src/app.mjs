@@ -4,6 +4,6 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("", stockRouter);
+app.use("/api/items", stockRouter);
 
 export default app;
