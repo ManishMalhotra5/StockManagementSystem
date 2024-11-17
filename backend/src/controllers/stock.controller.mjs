@@ -90,7 +90,7 @@ const increaseStockLevel = asyncHandler(async (req, res) => {
 		stockId: stock.id,
 		stockName: stock.name,
 		operation: "Restock",
-		preQauntity: prevQ,
+		preQuantity: prevQ,
 		currQuantity: stock.quantity,
 	});
 
@@ -121,7 +121,7 @@ const sellStock = asyncHandler(async (req, res) => {
 	}
 	const prevQ = stock.quantity;
 	stock.quantity = stock.quantity - quantity;
-	if (stock.quantity <= 0) {
+	if (stock.quantity < 0) {
 		throw new ApiError(403, "Can't sell! not enough stock are available");
 	}
 
@@ -132,7 +132,7 @@ const sellStock = asyncHandler(async (req, res) => {
 		stockId: stock.id,
 		stockName: stock.name,
 		operation: "Sell",
-		preQauntity: prevQ,
+		preQuantity: prevQ,
 		currQuantity: stock.quantity,
 	});
 
@@ -167,9 +167,15 @@ const getLogHistory = asyncHandler(async (req, res) => {
 });
 
 const stocksBelowMinimumReqLevel = asyncHandler(async (req, res) => {
-	const stocks = await Stock.find({
-		$expr: { $lt: ["$quantity", "$minimumRequiredStock"] },
-	});
+	const stocks = await Stock.aggregate([
+		{
+			$match: {
+				$expr: {
+					$lt: ["$quantity", "$minimumRequiredStock"],
+				},
+			},
+		},
+	]);
 
 	if (!stocks || stocks.length === 0) {
 		throw new ApiError(404, "No information found");
@@ -186,6 +192,122 @@ const stocksBelowMinimumReqLevel = asyncHandler(async (req, res) => {
 		);
 });
 
+const salesReport = asyncHandler(async (req, res) => {
+	const { start, end } = req.query;
+	if (!start && !end) {
+		throw new ApiError(404, "Start or end date not found");
+	}
+	const sales = await Log.aggregate([
+		{
+			$match: {
+				operation: "Sell",
+				createdAt: {
+					$gte: new Date(start),
+					$lte: new Date(end),
+				},
+			},
+		},
+		{
+			$lookup: {
+				from: "stocks",
+				localField: "stockId",
+				foreignField: "id",
+				as: "stock_details",
+			},
+		},
+		{
+			$addFields: {
+				stock: {
+					$first: "$stock_details",
+				},
+			},
+		},
+		{
+			$group: {
+				_id: "$stockId",
+				totalSold: {
+					$sum: {
+						$subtract: ["$preQuantity", "$currQuantity"],
+					},
+				},
+				stock: {
+					$first: "$stock",
+				},
+			},
+		},
+		{
+			$project: {
+				name: "$stock.name",
+				totalSold: 1,
+				revenue: {
+					$multiply: ["$stock.price", "$totalSold"],
+				},
+			},
+		},
+	]);
+
+	if (!sales || sales.length === 0) {
+		throw new ApiError(404, "Sales report not found");
+	}
+
+	return res
+		.status(200)
+		.json(
+			new ApiResponse(200, { sales }, "Sales report fetched successfully")
+		);
+});
+const topSellingItems = asyncHandler(async (req, res) => {
+	const { start, end, limit } = req.query;
+	if (!start && !end) {
+		throw new ApiError(404, "Start or end date not found");
+	}
+	let _limit;
+	if (limit) {
+		_limit = limit;
+	} else {
+		_limit = 10;
+	}
+
+	const topSelling = await Log.aggregate([
+		{
+			$match: {
+				operation: "Sell",
+				createdAt: {
+					$lte: new Date(start),
+					$gte: new Date(end),
+				},
+			},
+		},
+		{
+			$group: {
+				_id: "$stockId",
+				totalSold: {
+					$sum: {
+						$subtract: ["$preQuantity", "$currQuantity"],
+					},
+				},
+			},
+		},
+		{
+			$sort: {
+				totalSold: -1,
+			},
+		},
+	]);
+
+	if (!topSelling || topSelling.length === 0) {
+		throw new ApiError(404, "Report not found");
+	}
+	return res
+		.status(200)
+		.json(
+			new ApiResponse(
+				200,
+				{ topSelling },
+				"Top selling items are fetched successfully"
+			)
+		);
+});
 export {
 	addStock,
 	sellStock,
@@ -193,4 +315,6 @@ export {
 	updateStock,
 	getLogHistory,
 	stocksBelowMinimumReqLevel,
+	salesReport,
+	topSellingItems,
 };

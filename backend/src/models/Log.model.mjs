@@ -19,7 +19,7 @@ const logSchema = new mongoose.Schema(
 			type: String,
 			required: true,
 		},
-		preQauntity: {
+		preQuantity: {
 			type: Number,
 		},
 		currQuantity: {
